@@ -60,6 +60,10 @@ All other parameters fixed:
 
 TTFF remained stable (~55–58 ms) across all resolutions.
 
+### Visualization
+
+![Resolution vs TTFF](resolution_vs_ttff.png)
+
 Conclusion:
 
 Resolution and decoding complexity are not dominant factors in startup latency under this architecture.  
