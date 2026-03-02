@@ -1,5 +1,9 @@
 # Low Latency Video System Study
 
+## Experiments Included
+- Resolution vs TTFF (FFmpeg + WebSocket + JSMpeg, localhost)
+- GOP vs TTFF (+ bandwidth trade-off)
+
 ## Project Overview
 
 This project benchmarks end-to-end startup latency (TTFF: Time To First Frame) in a low-latency video streaming pipeline based on:
@@ -35,34 +39,15 @@ Where:
 
 ---
 
-## Experiment 1: Resolution vs TTFF
+## Experiments
 
-### Objective
+### 1. Resolution vs TTFF
+Investigates whether decoding complexity affects startup latency.  
+→ See: experiments/resolution_vs_ttff/report.md
 
-To measure whether video resolution impacts startup latency.
-
-### Variables
-
-Resolutions tested:
-
-- 426x240
-- 640x360
-- 854x480
-- 1280x720
-
-All other parameters fixed:
-- Same PC
-- Same browser (Edge)
-- Same WebSocket localhost
-- Same bitrate and FPS
-
-### Result Summary
-
-TTFF remained stable (~55–58 ms) across all resolutions.
-
-### Visualization
-
-![Resolution vs TTFF](resolution_vs_ttff.png)
+### 2. GOP vs TTFF (+ Bandwidth Trade-off)
+Evaluates the impact of keyframe interval on startup latency and bandwidth cost.  
+→ See: experiments/gop_vs_ttff/report.md
 
 Conclusion:
 
