@@ -26,7 +26,7 @@ void RingBuffer::push(const char* data, size_t len) {
     size_t offset = find_iframe_header(data, len);
 
     if (offset != std::string::npos) {
-        // 🚨 发现全新 GOP！执行方案B核心逻辑：斩断过去
+        // 发现全新 GOP！执行方案B核心逻辑：斩断过去
         buffer_.clear();
 
         // 正确做法：不要切片！直接把包含 I 帧的整个数据块完整存进去
