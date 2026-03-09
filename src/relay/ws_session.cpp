@@ -103,7 +103,9 @@ void WsSession::send_binary(const std::vector<char>& data) {
     ws_.binary(true);
     ws_.write(asio::buffer(data), ec);
 
-    if (ec) {
-        std::cerr << "[WS] 写入失败: " << ec.message() << std::endl;
+    // 判断如果不是正常断开的错误，才打印日志（过滤掉正常退出的噪音）
+    if (ec && ec != beast::websocket::error::closed) {
+        // ec.value() 会打印数字错误码，比如 10054，彻底绕开 Windows 的中文乱码问题
+        std::cerr << "[WS] 客户端异常断开或写入失败 (错误码: " << ec.value() << ")" << std::endl;
     }
 }

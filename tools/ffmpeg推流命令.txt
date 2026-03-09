@@ -1,0 +1,15 @@
+ffmpeg -f dshow -video_size 640x480 -framerate 30 -i video="Integrated Camera" -c:v mpeg1video -b:v 800k -maxrate 800k -bufsize 400k -g 30 -bf 0 -muxdelay 0.001 -f mpegts "tcp://127.0.0.1:9001"
+
+| 参数                     		| 含义                       					|
+| ---------------------- 	| ------------------------ 				|
+| -re                   		| 按真实时间发送视频                		|
+| -stream_loop -1      	| 无限循环播放视频                 			|
+| -i test.mp4         		| 输入视频                     				|
+| -c:v mpeg1video      	| 编码成 MPEG1Video（JSMpeg必须） 	|
+| -b:v 1500k           		| 视频码率                     				|
+| -r 30               		| 帧率                       					|
+| -g 30             			|GOP长度							|
+| -s 640x480           		| 分辨率                      				|
+|-bf 0				|禁用B帧、降低延迟					|
+| -f mpegts            		| 输出 MPEG-TS               				|
+| tcp://127.0.0.1:9001 	| 推送到 relay                				|

@@ -12,9 +12,12 @@ private:
     std::mutex mtx_;
     size_t max_chunks_;
 
+    // 新增：在Ringbuffer内部声明扫描函数
+	size_t find_iframe_header(const char* data, size_t len);
+
 public:
     // 构造函数，指定最大缓存帧数
-    explicit RingBuffer(size_t max_chunks = 100);
+    explicit RingBuffer(size_t max_chunks = 500);
 
     // 推送新数据到缓冲区
     void push(const char* data, size_t len);

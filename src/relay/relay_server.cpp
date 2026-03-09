@@ -13,7 +13,7 @@ RelayServer::RelayServer(asio::io_context& io, unsigned short tcp_port, unsigned
     : io_(io),
     tcp_acceptor_(io, tcp::endpoint(tcp::v4(), tcp_port)),
     ws_acceptor_(io, tcp::endpoint(tcp::v4(), ws_port)),
-    ring_(150) { // 稍微增加一点缓存长度，容纳约 1-2 秒的数据
+    ring_(100) { // 稍微增加一点缓存长度，容纳约 1-2 秒的数据
 }
 
 void RelayServer::start() {
