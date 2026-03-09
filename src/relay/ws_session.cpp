@@ -56,6 +56,7 @@ void WsSession::send_binary(const std::vector<char>& data) {
 
     /* 核心优化 4：使用非阻塞锁保护写操作，配合 I 帧识别实现“主动丢帧”
     * 避免了直接丢弃 Chunk 导致 MPEG-TS 结构破坏和前端解码花屏的致命缺陷。
+	* 丢弃策略：当无法获得锁时，说明网络拥塞正在发生，此时开启“等待关键帧”模式，强制丢弃当前及后续残缺片段，直到下一个 I 帧到来。
     */
 
     std::unique_lock<std::mutex> lock(write_mtx_, std::try_to_lock);

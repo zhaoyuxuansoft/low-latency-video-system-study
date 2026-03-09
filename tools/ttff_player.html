@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8" />
+    <title>流媒体中转实验工具</title>
+    <style>
+        /* 页面基础样式：深色背景，符合开发者审美 */
+        body {
+            background: #111;
+            color: #eee;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 24px;
+        }
+
+        h2 {
+            margin: 0 0 16px 0;
+        }
+
+        /* 视频画布样式 */
+        #video {
+            width: 640px;
+            height: 480px;
+            border: 1px solid #444;
+            background: #000;
+            display: block;
+            margin: 0 auto;
+        }
+
+        #status, #last-result {
+            margin-top: 12px;
+            font-size: 15px;
+        }
+
+        /* 按钮控制区域 */
+        .controls {
+            margin-top: 16px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 8px 14px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        /* 数据面板和日志区域样式 */
+        .panel {
+            width: 1100px;
+            max-width: 96vw;
+            margin: 20px auto 0;
+            text-align: left;
+            background: #1b1b1b;
+            border: 1px solid #333;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+
+        #log {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 13px;
+            line-height: 1.5;
+            max-height: 220px;
+            overflow-y: auto;
+            background: #0f0f0f;
+            border: 1px solid #333;
+            padding: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+
+        th, td {
+            border: 1px solid #333;
+            padding: 6px 8px;
+            text-align: left;
+        }
+
+        th {
+            background: #222;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>C++ 中转站 + JSMpeg 性能测量实验播放器</h2>
+
+    <canvas id="video" width="640" height="480"></canvas>
+
+    <div id="status">当前状态: 等待中...</div>
+    <div id="last-result">最近一次测量: 无</div>
+
+    <div class="controls">
+        <button id="connectBtn">单次连接</button>
+        <button id="reconnectBtn">手动重连</button>
+        <button id="autoReconnectBtn">自动压力测试 x10</button>
+        <button id="clearBtn">清空结果</button>
+        <button id="exportBtn">导出 CSV 数据</button>
+    </div>
+
+    <div class="panel">
+        <h3>测量结果统计表</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>编号</th>
+                    <th>触发类型</th>
+                    <th>发起时间</th>
+                    <th>播放器初始化完成</th>
+                    <th>首帧渲染完成</th>
+                    <th>初始化耗时 (ms)</th>
+                    <th>TTFF 首帧耗时 (ms)</th>
+                </tr>
+            </thead>
+            <tbody id="resultBody"></tbody>
+        </table>
+    </div>
+
+    <div class="panel">
+        <h3>运行日志</h3>
+        <div id="log"></div>
+    </div>
+
+    <script src="jsmpeg.min.js"></script>
+    <script>
+        let player = null;
+        const wsUrl = "ws://localhost:9999"; // 连接到你 C++ RelayServer 的地址
+
+        const canvas = document.getElementById("video");
+        const statusEl = document.getElementById("status");
+        const lastResultEl = document.getElementById("last-result");
+        const logEl = document.getElementById("log");
+        const resultBody = document.getElementById("resultBody");
+
+        let experimentResults = [];   // 存储所有实验数据
+        let currentMeasurement = null; // 当前正在进行的测量对象
+        let firstFrameDetected = false;
+        let detectLoopStarted = false;
+        let autoRunning = false;
+
+        // 获取高精度时间（微秒级）
+        function nowMs() {
+        return performance.now();
+        }
+
+        // 格式化数字，保留三位小数
+        function fmtMs(v) {
+        return v.toFixed(3);
+        }
+
+        // 格式化当前墙上时间（时:分:秒.毫秒）
+        function fmtWallTimeMs() {
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mm = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        const ms = String(d.getMilliseconds()).padStart(3, "0");
+        return `${hh}:${mm}:${ss}.${ms}`;
+        }
+
+        function setStatus(text) {
+        statusEl.textContent = "当前状态: " + text;
+        console.log(text);
+        }
+
+        function log(msg) {
+        const line = `[${fmtWallTimeMs()}] ${msg}`;
+        console.log(line);
+        logEl.textContent += line + "\n";
+        logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // 实时更新表格视图
+        function updateTable() {
+        resultBody.innerHTML = "";
+        experimentResults.forEach((r, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+        <td>${idx + 1}</td>
+        <td>${r.type}</td>
+        <td>${r.startWallTime}</td>
+        <td>${r.playerCreatedWallTime}</td>
+        <td>${r.firstFrameWallTime}</td>
+        <td>${fmtMs(r.playerCreateMs)}</td>
+        <td>${fmtMs(r.ttffMs)}</td>
+        `;
+        resultBody.appendChild(tr);
+        });
+        }
+
+        function addResult(result) {
+        experimentResults.push(result);
+        updateTable();
+        lastResultEl.textContent =
+        `Last result: ${result.type}, create = ${fmtMs(result.playerCreateMs)} ms, TTFF = ${fmtMs(result.ttffMs)} ms`;
+        }
+
+        // 开始一次计时测量
+        function startMeasurement(type) {
+            currentMeasurement = {
+                type: type,
+                startPerf: nowMs(),
+                startWallTime: fmtWallTimeMs(),
+                playerCreatedPerf: null,
+                playerCreatedWallTime: null,
+                firstFrameWallTime: null,
+                resultPushed: false
+            };
+            firstFrameDetected = false;
+            log(`Measurement started: ${type}`);
+        }
+
+        // 标记播放器对象创建成功的时刻
+        function markPlayerCreated() {
+        if (!currentMeasurement) return;
+        currentMeasurement.playerCreatedPerf = nowMs();
+        currentMeasurement.playerCreatedWallTime = fmtWallTimeMs();
+        const createMs = currentMeasurement.playerCreatedPerf - currentMeasurement.startPerf;
+        log(`Player created for ${currentMeasurement.type}, create time = ${fmtMs(createMs)} ms`);
+        }
+
+        // 核心函数：当画面出现非黑像素时触发，标志着首帧渲染成功
+        function finishMeasurement() {
+        if (!currentMeasurement || firstFrameDetected || currentMeasurement.resultPushed) return;
+
+        firstFrameDetected = true;
+
+        const firstFramePerf = nowMs();
+
+        const result = {
+        type: currentMeasurement.type,
+        startWallTime: currentMeasurement.startWallTime,
+        playerCreatedWallTime: currentMeasurement.playerCreatedWallTime || "",
+        firstFrameWallTime: fmtWallTimeMs(),
+        playerCreateMs: currentMeasurement.playerCreatedPerf !== null
+        ? (currentMeasurement.playerCreatedPerf - currentMeasurement.startPerf)
+        : NaN,
+        ttffMs: firstFramePerf - currentMeasurement.startPerf
+        };
+
+        currentMeasurement.resultPushed = true;
+        addResult(result);
+        log(`First frame detected for ${result.type}, TTFF = ${fmtMs(result.ttffMs)} ms`);
+        currentMeasurement = null;
+        }
+
+
+        /**
+        * 图像扫描循环：
+        * 这是本文档中最巧妙的部分。它通过不断扫描 Canvas 的像素数据，
+        * 判断 RGB 值的总和是否大于 0。如果大于 0，说明屏幕不再是全黑，视频流已经送达并渲染。
+        */
+        // function detectFirstFrameLoop() {
+        //     try {
+        //     const ctx = canvas.getContext("2d");
+        //     const w = canvas.width;
+        //     const h = canvas.height;
+
+        //     if (ctx && w > 0 && h > 0) {
+        //     const img = ctx.getImageData(0, 0, w, h).data;
+
+        //     let nonZeroCount = 0;
+        //     const step = 16; // 更稳定一点，固定步长
+
+        //     for (let i = 0; i < img.length; i += step) {
+        //         if (img[i] !== 0 || img[i + 1] !== 0 || img[i + 2] !== 0) {
+        //         nonZeroCount++;
+        //         }
+        //     }
+
+        //     // 只要有足够多非黑像素，就认为首帧到了
+        //     if (nonZeroCount > 20 && currentMeasurement && !firstFrameDetected) {
+        //         finishMeasurement();
+        //     }
+        //     }
+        // } catch (e) {
+        // }
+
+        // requestAnimationFrame(detectFirstFrameLoop);
+        // }
+
+
+        // 彻底销毁旧播放器实例
+        function destroyPlayer() {
+        if (player) {
+        try {
+        player.destroy();
+        } catch (e) {}
+        player = null;
+        }
+        }
+
+        // 建立 WebSocket 连接并初始化播放器
+        function connectPlayer(type) {
+        destroyPlayer();
+
+        startMeasurement(type);
+        setStatus("正在连接至 " + wsUrl);
+        log(`创建播放器实例: ${type}`);
+
+        try {
+            player = new JSMpeg.Player(wsUrl, {
+                canvas: canvas,
+                autoplay: true,
+                audio: false,       // 实验通常关闭音频降低CPU负载
+                pauseWhenHidden: false, // 标签页切走时是否暂停（false配合重连逻辑）
+                videoBufferSize: 512 * 1024,    // 限制缓冲区为512KB，防止旧数据积压
+
+                // 关键：第一次成功解码视频帧时，直接记为首帧到达
+                onVideoDecode: function(decoder, time) {
+                    if (currentMeasurement && !firstFrameDetected) {
+                        finishMeasurement();
+                        }
+                    }
+                });
+                currentMeasurement.playerCreatedPerf = nowMs();
+                statusEl.textContent = "已连接（优化模式）"
+                log("播放器已启动，已开启低延迟缓冲区策略")
+
+            } catch (e) {
+                log("播放器创建异常: " + e.message);
+            }
+        }
+
+        // 自动重连逻辑，用于压力测试和收集平均 TTFF
+        async function autoReconnect(times = 10, gapMs = 3000) {
+            if (autoRunning) {
+                log("Auto reconnect is already running");
+                return;
+            }
+
+            autoRunning = true;
+            log(`Auto reconnect started: ${times} runs`);
+
+            for (let i = 1; i <= times; i++) {
+                log(`Auto reconnect run ${i}/${times}`);
+                connectPlayer(`auto_reconnect_${i}`);
+                await new Promise(resolve => setTimeout(resolve, gapMs));
+            }
+
+            autoRunning = false;
+            log("Auto reconnect finished");
+        }
+
+        // 将测量数据导出为 CSV 文件，方便放入毕业论文的 Excel 图表中
+        function exportCSV() {
+        if (experimentResults.length === 0) {
+        alert("没有可导出的数据。");
+        return;
+        }
+
+        let csv = "编号,类型,发起时间,初始化时间,首帧时间,初始化耗时ms,TTFF耗时ms\n";
+        experimentResults.forEach((r, idx) => {
+        csv += `${idx + 1},${r.type},${r.startWallTime},${r.playerCreatedWallTime},${r.firstFrameWallTime},${fmtMs(r.playerCreateMs)},${fmtMs(r.ttffMs)}\n`;
+        });
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "首帧延迟测量结果.csv";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        URL.revokeObjectURL(url);
+        log("CSV 文件已导出");
+        }
+
+        // 绑定按钮事件
+        document.getElementById("connectBtn").addEventListener("click", () => {
+        connectPlayer("手动连接");
+        });
+
+        document.getElementById("reconnectBtn").addEventListener("click", () => {
+        connectPlayer("手动重连");
+        });
+
+        document.getElementById("autoReconnectBtn").addEventListener("click", () => {
+        autoReconnect(10, 3000); // 连续测试 10 次
+        });
+
+        document.getElementById("clearBtn").addEventListener("click", () => {
+        experimentResults = [];
+        updateTable();
+        lastResultEl.textContent = "最近结果: 无";
+        logEl.textContent = "";
+        log("测量结果已清空");
+        });
+
+        document.getElementById("exportBtn").addEventListener("click", exportCSV);
+
+        // 页面加载完成后自动开始第一次连接
+        window.addEventListener("load", () => {
+        log("页面加载完成");
+        connectPlayer("首屏加载");
+
+        // if (!detectLoopStarted) {
+        // detectLoopStarted = true;
+        // requestAnimationFrame(detectFirstFrameLoop);
+        // }
+        });
+
+        // 监测标签页切换：当用户切回本页面时自动重连
+        document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+        log("检测到标签页切回，正在重新同步视频流...");
+        setTimeout(() => {
+        connectPlayer("标签页唤醒");
+        }, 200);
+        }
+        });
+    </script>
+</body>
+</html>
